@@ -1,7 +1,7 @@
-import java.io.FileNotFoundException;
 import java.io.PrintWriter;
 import java.util.ArrayList;
-import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 
@@ -14,104 +14,115 @@ public class Query {
 	InvertedIndex invertedIndex;
 	PrintWriter out;
 	
-	int termNumber = 0;
-	
 	public Query(){
 		invertedIndex = InvertedIndex.getInstance();
 	}
 	
-	// Basic query language: 'term' 'multiword phrase' > true/false
-	// Only accepted operator is >, which will check if the phrases on the left of it are in greater number than the phrases on its right.
-	// Boolean at the end indicates whether or not we want to retrieve plays or scenes.
+	/** Executes query with format: [terms] ['multiple terms'] (optional operator) [ranking method] [getPlay] */
 	public void executeQuery(String query){
 		String[] phrases;
 		if(query.contains("'"))
 			phrases = query.split("'");
 		else
 			phrases = query.split(" ");
+		
+		if(phrases.length < 1)
+			return;
+		
+		// Query phrase frequency used in ranking algorithms.
+		HashMap<String, Integer> phraseCount = new HashMap<String, Integer>();
 		ArrayList<String> trimmedPhrases = new ArrayList<String>();
-		// Trims the phrases set to get rid of spaces.
-		for(int i = 0; i < phrases.length - 1; i++){
+
+		boolean getPlay = false;
+		boolean qlRank = false;
+
+		for(int i = 0; i < phrases.length; i++){
 			if(!phrases[i].trim().isEmpty()){
-				trimmedPhrases.add(phrases[i].trim().toLowerCase());
+				String phrase = phrases[i].trim().toLowerCase();
+				if(phrase.equals("ql")){
+					qlRank = true;
+				}else if(phrase.equals("getplay")){
+					getPlay = true;
+				}else{
+					Integer count = phraseCount.get(phrase);
+					if(count == null)
+						count = 0;
+					phraseCount.put(phrase, count + 1);
+					trimmedPhrases.add(phrase);
+				}
 			}
 		}
 		
-		boolean getPlay = false;
-		
-		if(phrases[phrases.length - 1].contains("true")){
-			getPlay = true;
-		}else if(!phrases[phrases.length - 1].contains("false")){
-			System.out.println("Query must end with a boolean value.");
-			return;
-		}
-		ArrayList<String> sceneResults = executeCommand(trimmedPhrases);
-		printToFile(query, sceneResults, getPlay);
+		ArrayList<Scene> sceneResults = executeCommand(trimmedPhrases);
+		rank(phraseCount, sceneResults, qlRank);
+		printToFile(query, sceneResults, getPlay, qlRank);
 	}
 	
-	// Executes query over every scene.
-	private ArrayList<String> executeCommand(ArrayList<String> phrases){
-		// If operatorIndex is -1, there is no '>.' Otherwise, it divides the phrase list into a left hand and right hand side.
+	/** Executes query over every scene. */
+	private ArrayList<Scene> executeCommand(ArrayList<String> phrases){
 		int operatorIndex = -1;
 		for(int i = 0; i < phrases.size(); i++){
 			if(phrases.get(i).equals(">")){
 				operatorIndex = i;
 				phrases.remove(i);
+				break;
 			}
 		}
 		
-		// Scenes that fulfill the query.
-		ArrayList<String> sceneResults = new ArrayList<String>();
+		ArrayList<Scene> sceneResults = new ArrayList<Scene>();
 		
-		for(String scene : invertedIndex.getScenes()){
+		for(Scene scene : invertedIndex.getScenes()){
 			ArrayList<Integer> counts = new ArrayList<Integer>();
 			
 			for(String phrase : phrases){
-				counts.add(invertedIndex.countPhrase(phrase, scene));
+				counts.add(invertedIndex.countPhrase(phrase, scene.getScene()));
 			}
 			
-			// If we're comparing two subsets of the list...
+			// Separates the list in two to perform the greater than operation.
 			if(operatorIndex >= 1){
 				int left = sum(counts.subList(0, operatorIndex));
 				int right = sum(counts.subList(operatorIndex, counts.size()));
 				if(left > right){
 					sceneResults.add(scene);
 				}
-			// Otherwise we're just interested in whether or not they appeared in this scene.
 			}else{
 				if(sum(counts.subList(0, counts.size())) > 0){
 					sceneResults.add(scene);
 				}
 			}
 		}
+
 		return sceneResults;
 	}
 	
-	// Prints the scenes/plays to file, according to the getPlay boolean.
-	private void printToFile(String query, ArrayList<String> scenes, boolean getPlay){
-		HashSet<String> results = new HashSet<String>();
-		for(String doc : scenes){
-			if(getPlay)
-				doc = invertedIndex.getPlay(doc);
-			results.add(doc);
-		}
-		String[] abcResults = results.toArray(new String[results.size()]);
-		Arrays.sort(abcResults, 0, abcResults.length);
-		try {
-			out = new PrintWriter("./result" + termNumber + ".txt");
-			out.println(query);
-			for(int i = 0; i < abcResults.length; i++){
-				out.println(abcResults[i]);
-			}
-			out.close();
-		} catch (FileNotFoundException e) {
-			e.printStackTrace();
-		}
-		System.out.println("Result printed to result" + termNumber + ".txt.");
-		termNumber++;
+	/** Picks ranking algorithm to use based on whether or not 'ql' appeared in query. */
+	private void rank(HashMap<String, Integer> phrases, ArrayList<Scene> results, boolean qlRank){
+		if(qlRank)
+			Ranking.performQL(phrases, results);
+		else
+			Ranking.performBM25(phrases, results);
 	}
 	
-	// Sums up all ints inside given lists.
+	/** Prints the scenes/plays to file, according to the getPlay and qlRank booleans. */
+	private void printToFile(String query, ArrayList<Scene> scenes, boolean getPlay, boolean qlRank){
+		Collections.sort(scenes);
+		String algorithmID = "bm25";
+		if(qlRank)
+			algorithmID = "ql";
+		HashSet<String> results = new HashSet<String>();
+		for(int i = 0; i < scenes.size() && results.size() < 5; i++){
+			String id = scenes.get(i).getScene();
+			if(getPlay)
+				id = scenes.get(i).getPlay();
+			// Avoid duplicate plays being printed if multiple scenes in same play.
+			if(results.add(id)){
+				float rank = (float) scenes.get(i).getScore();
+				System.out.println(String.format("%d. %s with %s rank %f.", results.size(), id, algorithmID, rank));
+			}
+		}
+	}
+	
+	/** Sums up values in list. */
 	private int sum(List<Integer> counts){
 		int sum = 0;
 		for(int i = 0; i < counts.size(); i++){

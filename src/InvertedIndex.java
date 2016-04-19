@@ -20,27 +20,21 @@ public class InvertedIndex {
 	// Map to find a term's posting list (postings contain scene/positional information).
 	private HashMap<String, ArrayList<Posting>> termPostings;
 	
-	// Map to find the play a scene belongs to.
-	private HashMap<String, String> scenePlays;
-	
-	// Set of unique scenes.
-	private HashSet<String> scenes;
+	private HashSet<Scene> scenes;
 	
 	private InvertedIndex(){
 		termPostings = new HashMap<String, ArrayList<Posting>>();
-		scenes = new HashSet<String>();
-		scenePlays = new HashMap<String, String>();
+		scenes = new HashSet<Scene>();
 	}
 	
-	// Gets the single instance of the II.
 	public static InvertedIndex getInstance(){
 		if(instance == null)
 			instance = new InvertedIndex();
 		return instance;
 	}
 	
-	// Builds the Inverted Index.
-	public void extractTerms(){
+	/** Builds the Inverted Index. */
+	public void buildIndex(){
 		JSONParser parser = new JSONParser();
 		try {
 			JSONObject json = (JSONObject) parser.parse(new BufferedReader(new FileReader("shakespeare-scenes.json")));
@@ -53,10 +47,9 @@ public class InvertedIndex {
 				String sceneID = scene.get("sceneId").toString();
 				String[] words = scene.get("text").toString().split("\\s+");
 				
-				scenes.add(sceneID);
-				scenePlays.put(sceneID, playID);
+				Scene sceneObject = new Scene(sceneID, playID, words);
+				scenes.add(sceneObject);
 				
-				// For each word in the scene's text, create a term.
 				for(int q = 0; q < words.length; q++){
 					createTerm(words[q], sceneID, q + 1);
 				}
@@ -66,54 +59,33 @@ public class InvertedIndex {
 		}
 	}
 	
-	// Associates the term with an new/updated posting list.
+	/** Associates the term with a new/updated posting list. */
 	private void createTerm(String term, String sceneID, int position){
 		ArrayList<Posting> postings = termPostings.get(term);
 		if(postings == null)
 			postings = new ArrayList<Posting>();
-		updatePosting(postings, sceneID, position);
+		int index = findPosting(postings, sceneID);
+		if(index == -1)
+			postings.add(new Posting(sceneID, position));
+		else
+			postings.get(index).addPosition(position);
 		termPostings.put(term, postings);
 	}
-	
-	// Updates a term's posting list with a new scene/positions pair.
-	private void updatePosting(ArrayList<Posting> postings, String sceneID, int position){
-		int index = findPosting(postings, sceneID);
-		if(index == -1){
-			postings.add(new Posting(sceneID, position));
-		}else{
-			// Update the found posting with a new position.
-			postings.get(index).addPosition(position);
-		}
-	}
-	
-	// Finds the posting that corresponds to the current scene.
-	private int findPosting(ArrayList<Posting> postings, String sceneID){
-		if(postings == null)
-			return -1;
-		for(int i = 0; i < postings.size(); i++){
-			if(postings.get(i).getID().equals(sceneID))
-				return i;
-		}
-		return -1;
-	}
-	
-	// Count the occurrences of this phrase in the scene. 
+
+	/** Counts the occurrences of this phrase in the given scene. */
 	public int countPhrase(String phrase, String scene){
 		int count = 0;
 		String[] terms = phrase.split("\\s+");
 		ArrayList<Posting> postings = new ArrayList<Posting>();
 		
-		// Get all relevant postings.
 		for(int i = 0; i < terms.length; i++){
 			ArrayList<Posting> postingList = termPostings.get(terms[i]);
 			int index = findPosting(postingList, scene);
-			// If even a single term in the phrase doesn't have a scene-related posting, this phrase can't appear in this scene.
 			if(index < 0)
 				return 0;
 			postings.add(postingList.get(index));
 		}
 
-		// All possible occurrences of the phrase must start from one of these indexes.
 		HashSet<Integer> startPositions = postings.get(0).getPositions();
 		for(int pos : startPositions){
 			boolean phraseValidity = true;
@@ -130,12 +102,53 @@ public class InvertedIndex {
 		return count;
 	}
 	
-	public HashSet<String> getScenes(){
-		return scenes;
+	/** Finds the posting that corresponds to the current scene. */
+	private int findPosting(ArrayList<Posting> postings, String sceneID){
+		if(postings == null)
+			return -1;
+		for(int i = 0; i < postings.size(); i++){
+			if(postings.get(i).getID().equals(sceneID))
+				return i;
+		}
+		return -1;
 	}
 	
-	public String getPlay(String scene){
-		return scenePlays.get(scene);
-	}	
+	/** Gets a list of Postings for the given term. */
+	public ArrayList<Posting> getPostings(String term){
+		String[] terms = term.split("\\s+");
+		ArrayList<Posting> result = termPostings.get(terms[0]);
+		for(int i = 1; i < terms.length; i++)
+			result.addAll(termPostings.get(terms[i]));
+		return result;
+	}
+	
+	/** Returns the number of times a term appears in the collection. */
+	public int getTermAppearanceCount(String term){
+		int count = 0;
+		for(Posting posting : getPostings(term)){
+			count += posting.getPositions().size();
+		}
+		return count;
+	}
+	
+	/** Returns the size of the collection. */
+	public int getCollectionSize(){
+		int count = 0;
+		for(Scene scene : scenes){
+			count += scene.getDocLength();
+		}
+		return count;
+	}
+	
+	/** Gets the average document length of the collection's scenes. */
+	public double getAverageLength(){
+		int count = getCollectionSize();
+		double divisor = scenes.size();
+		return count / divisor;
+	}
+	
+	public HashSet<Scene> getScenes(){
+		return scenes;
+	}
 	
 }

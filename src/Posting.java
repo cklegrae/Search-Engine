@@ -19,6 +19,7 @@ public class Posting {
 		return docID;
 	}
 	
+	/* Adds an index at which this posting's word was found. */
 	public void addPosition(int position){
 		positions.add(position);
 	}
@@ -27,7 +28,7 @@ public class Posting {
 		return positions;
 	}
 	
-	// Used when counting multi-word phrases. The argument will always indicate the position of the previous word in the phrase + 1.
+	/** Checks if the associated word appeared at the given index. */
 	public boolean containsPosition(int position){
 		return positions.contains(position);
 	}

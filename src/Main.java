@@ -5,13 +5,12 @@ public class Main {
 	// Creates Inverted Index, executes queries.
 	public static void main(String[] args) {
 		InvertedIndex index = InvertedIndex.getInstance();
-		index.extractTerms();
+		index.buildIndex();
 		
-		// Example queries
-		// query.executeQuery("'thee' 'thou' > 'you' false");
-		// query.executeQuery("'Verona' 'rome' 'Italy' false");
-		// query.executeQuery("'falstaff' true");
-		// query.executeQuery("'a rose by any other name' false");
+//		Example queries:
+//		query.executeQuery("the king queen royalty ql");
+//		query.executeQuery("rosencrantz guildenstern");
+//		query.executeQuery("hamlet > polonius");
 		
 		Query query = new Query();
 		Scanner scanner = new Scanner(System.in);
